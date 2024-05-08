@@ -1,36 +1,33 @@
-//
-// Created by bulatruslanovich on 08/05/2024.
-//
-
 #include <arpa/inet.h>
+#include <atomic>
 #include <cstring>
-#include <string>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <netinet/in.h>
 #include <sstream>
+#include <string>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 
 #ifndef TCP_CLIENT_TCP_SERVER_H
 #define TCP_CLIENT_TCP_SERVER_H
-
 
 class TCPServer {
 private:
     int port;
     std::mutex mtx;
+    std::atomic<bool> shouldStop;
 
 public:
-    explicit TCPServer(int port) : port(port) {}
+    TCPServer() : shouldStop(false), port(0) {}
+    explicit TCPServer(int port) : port(port), shouldStop(false) {}
 
     void run() {
         sockaddr_in serverAddr{};
         sockaddr_in client{};
-        socklen_t clientSize = sizeof (client);
+        socklen_t clientSize = sizeof(client);
 
         int sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -44,7 +41,7 @@ public:
 
         inet_pton(AF_INET, "0.0.0.0", &serverAddr.sin_addr);
 
-        if (bind(sock, (sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+        if (bind(sock, (sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
             std::cerr << "Unable to bind socket" << std::endl;
             close(sock);
             return;
@@ -55,9 +52,29 @@ public:
             return;
         }
 
-        while (true) {
+        while (!shouldStop.load()) {
+            // To wait for activity on the socket with a timeout of 1 second
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(sock, &readfds);
+
+            timeval timeout;
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            int activity = select(sock + 1, &readfds, nullptr, nullptr, &timeout);
+
+            if (activity == -1) {
+                std::cerr << "Error in select()" << std::endl;
+                continue;
+            }
+
+            if (activity == 0) {
+                continue;
+            }
+
             mtx.lock();
-            int clientSocket = accept(sock, (struct sockaddr *)&client, &clientSize);
+            int clientSocket = accept(sock, (struct sockaddr *) &client, &clientSize);
             mtx.unlock();
 
             if (clientSocket < 0) {
@@ -67,6 +84,16 @@ public:
 
             std::thread(&TCPServer::handleClient, this, clientSocket).detach();
         }
+
+        close(sock);
+    }
+
+    void stop() {
+        shouldStop.store(true);
+    }
+
+    void setPort(int newPort) {
+        this->port = newPort;
     }
 
 private:

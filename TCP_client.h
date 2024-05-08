@@ -3,12 +3,12 @@
 //
 #include <arpa/inet.h>
 #include <cstring>
-#include <string>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <netinet/in.h>
 #include <sstream>
+#include <string>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
@@ -19,13 +19,14 @@
 
 class TCPClient {
 private:
-    std::string* clientName;
+    std::string clientName;
     int serverPort;
     int connectionPeriod;
-    std::mutex mtx;
+
 
 public:
-    TCPClient(std::string *name, int port, int period) : clientName(name),  serverPort(port), connectionPeriod(period) {}
+    TCPClient(std::string name, int port, int period) : clientName(std::move(name)), serverPort(port), connectionPeriod(period) {}
+    ~TCPClient() = default;
 
     void run() {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -43,7 +44,6 @@ public:
         inet_pton(AF_INET, ipAddress.c_str(), &serverAddr.sin_addr);
 
 
-
         while (true) {
             if (!isConnected) {
                 if (connect(sock, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
@@ -55,16 +55,12 @@ public:
                 isConnected = true;
             }
 
-
-
             sendTimestamp(sock);
             std::this_thread::sleep_for(std::chrono::seconds(connectionPeriod));
-
         }
     }
 
 private:
-
     void sendTimestamp(int sock) {
         time_t now = time(nullptr);
         char timestamp[50];
@@ -74,8 +70,7 @@ private:
         std::stringstream ss;
         ss << id;
         std::string id_str = ss.str();
-
-        std::string message = std::string(timestamp) + *clientName + " " + id_str.substr(0, 3);
+        std::string message = std::string(timestamp) + clientName + " " + id_str.substr(0, 1) + id_str.substr(5, 7);
 
         send(sock, message.data(), message.length(), 0);
     }
